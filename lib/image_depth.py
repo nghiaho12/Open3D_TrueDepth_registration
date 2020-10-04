@@ -14,7 +14,6 @@ class ImageDepth:
         height=480,
         min_depth=0.1,
         max_depth=0.5,
-        distance_threshold=0.02,
         normal_radius=0.1):
 
         self.image_file = image_file
@@ -24,7 +23,6 @@ class ImageDepth:
         self.height = height
         self.min_depth = min_depth
         self.max_depth = max_depth
-        self.distance_threshold = distance_threshold
         self.normal_radius = normal_radius
 
         self.load_calibration(calibration_file)

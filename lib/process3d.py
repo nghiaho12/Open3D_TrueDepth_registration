@@ -43,7 +43,6 @@ def process3d(args):
             args.height,
             args.min_depth,
             args.max_depth,
-            args.distance_threshold,
             args.normal_radius)
 
         obj.pcd.paint_uniform_color(colors[i])
@@ -129,7 +128,7 @@ def process3d(args):
         reg = o3d.registration.registration_icp(
             cur.pcd,
             global_pcd,
-            cur.distance_threshold,
+            args.distance_threshold,
             guess,
             o3d.registration.TransformationEstimationPointToPlane())
 
