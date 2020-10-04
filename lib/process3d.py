@@ -12,8 +12,8 @@ from . rigid_transform_3D import rigid_transform_3D
 from . image_depth import ImageDepth
 
 def process3d(args):
-    image_files = sorted(glob.glob(f"{args.folder}/video*.bin"))[0:3]
-    depth_files = sorted(glob.glob(f"{args.folder}/depth*.bin"))[0:3]
+    image_files = sorted(glob.glob(f"{args.folder}/video*.bin"))[18:22]
+    depth_files = sorted(glob.glob(f"{args.folder}/depth*.bin"))[18:22]
     calibration_file =f"{args.folder}/calibration.json"
 
     if len(image_files) == 0:
@@ -53,10 +53,10 @@ def process3d(args):
     prev = point_clouds.pop(0)
     global_pcd = prev.pcd
     last_transform = np.eye(4,4)
-    last_vel = np.eye(4,4)
+    last_pose_delta = np.eye(4,4)
 
     sift = cv.SIFT_create()
-    prev_kp, prev_desc = sift.detectAndCompute(prev.gray, None)
+    prev_kp, prev_desc = sift.detectAndCompute(prev.gray_undistort, None)
 
     FLANN_INDEX_KDTREE = 0
     index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
@@ -68,7 +68,7 @@ def process3d(args):
         print(cur.image_file, cur.depth_file)
 
         if args.vis_tracking:
-            cur_kp, cur_desc = sift.detectAndCompute(cur.gray, None)
+            cur_kp, cur_desc = sift.detectAndCompute(cur.gray_undistort, None)
 
             knn_matches = flann.knnMatch(prev_desc, cur_desc, k=2)
 
@@ -95,8 +95,8 @@ def process3d(args):
             prev_pts = np.array(prev_pts)[np.where(mask)]
             cur_pts = np.array(cur_pts)[np.where(mask)]
 
-            prev_3d, prev_2d, prev_good_idx = prev.get_point3d(prev_pts)
-            cur_3d, cur_2d, cur_good_idx = cur.get_point3d(cur_pts)
+            prev_3d, prev_2d, prev_good_idx = prev.project3d(prev_pts)
+            cur_3d, cur_2d, cur_good_idx = cur.project3d(cur_pts)
 
             # find common good points
             good_idx = np.intersect1d(prev_good_idx, cur_good_idx)
@@ -105,24 +105,27 @@ def process3d(args):
             cur_3d = cur_3d[good_idx]
             cur_2d = cur_2d[good_idx]
 
-            R, t = rigid_transform_3D(cur_3d.transpose(), prev_3d.transpose())
+            R, t, rmse = rigid_transform_3D(cur_3d.transpose(), prev_3d.transpose())
             delta = np.eye(4, 4)
             delta[0:3, 0:3] = R
             delta[0:3, 3:4] = t
-            print("delta")
+            print("vision delta")
             print(delta)
-
-            img = cv.cvtColor(cur.gray, cv.COLOR_GRAY2BGR)
+            print("rmse:", rmse)
+            img = cv.cvtColor(cur.gray_undistort, cv.COLOR_GRAY2BGR)
 
             for a, b in zip(prev_2d, cur_2d):
                 aa = (a[0].item(), a[1].item())
                 bb = (b[0].item(), b[1].item())
                 img = cv.line(img, aa, bb, (0,0,255))
 
-            cv.imshow("cur", img)
-            cv.waitKey(100)
+            #cv.imwrite("a.png", cur.img)
+            #cv.imwrite("b.png", cur.img_undistort)
+            if args.viz:
+                cv.imshow("cur", img)
+                cv.waitKey(0)
 
-        guess = last_transform# @ delta
+        guess = last_transform @ delta
         reg = o3d.registration.registration_icp(
             cur.pcd,
             global_pcd,
@@ -135,9 +138,9 @@ def process3d(args):
         global_pcd += cur.pcd
 
         # estimate crude velocity
-        last_vel = np.linalg.inv(last_transform) @ reg.transformation
-        print("last_vel")
-        print(last_vel)
+        transform_delta = np.linalg.inv(last_transform) @ reg.transformation
+        print("depth map delta")
+        print(transform_delta)
         print("")
 
         last_transform = reg.transformation
@@ -168,4 +171,6 @@ def process3d(args):
             vis.run()
             vis.destroy_window()
 
-        custom_draw_geometry([global_pcd])
+        axis = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
+
+        custom_draw_geometry([global_pcd, axis])

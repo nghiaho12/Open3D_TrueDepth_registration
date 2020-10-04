@@ -9,7 +9,6 @@ from math import sqrt
 # t = 3x1 column vector
 
 def rigid_transform_3D(A, B):
-    print(A.shape, B.shape)
     assert A.shape == B.shape
 
     num_rows, num_cols = A.shape
@@ -50,4 +49,8 @@ def rigid_transform_3D(A, B):
 
     t = -R@centroid_A + centroid_B
 
-    return R, t
+    err = B - R@A + t
+    err = np.sum(err**2, 0)
+    rmse = np.sqrt(np.mean(err))
+
+    return R, t, rmse

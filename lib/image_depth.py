@@ -26,7 +26,7 @@ class ImageDepth:
         self.normal_radius = normal_radius
 
         self.load_calibration(calibration_file)
-        #self.create_undistortion_lookup()
+        self.create_undistortion_lookup()
 
         self.load_image(image_file)
         self.load_depth(depth_file, max_distance)
@@ -37,19 +37,14 @@ class ImageDepth:
 
             lensDistortionLookupBase64 = data["lensDistortionLookup"]
             inverseLensDistortionLookupBase64 = data["inverseLensDistortionLookup"]
-            lensDistortionLookupBinary = base64.decodebytes(lensDistortionLookupBase64.encode("ascii"))
-            inverseLensDistortionLookupBinary = base64.decodebytes(inverseLensDistortionLookupBase64.encode("ascii"))
-            lensDistortionLookup = []
-            inverseLensDistortionLookup = []
+            lensDistortionLookupByte = base64.decodebytes(lensDistortionLookupBase64.encode("ascii"))
+            inverseLensDistortionLookupByte = base64.decodebytes(inverseLensDistortionLookupBase64.encode("ascii"))
 
-            # create arrays of 32-bit floating point numbers
-            for i in range(0, len(lensDistortionLookupBinary), 4):
-                lensDistortionLookup.append(struct.unpack('<f', lensDistortionLookupBinary[i:i+4])[0])
-            for i in range(0, len(inverseLensDistortionLookupBinary), 4):
-                inverseLensDistortionLookup.append(struct.unpack('<f', inverseLensDistortionLookupBinary[i:i+4])[0])
+            lensDistortionLookup = struct.unpack(f"<{len(lensDistortionLookupByte)//4}f",lensDistortionLookupByte)
+            inverseLensDistortionLookup = struct.unpack(f"<{len(inverseLensDistortionLookupByte)//4}f",inverseLensDistortionLookupByte)
 
-            self.lensDistortion = lensDistortionLookup
-            self.inverseLensDistortion = inverseLensDistortionLookup
+            self.lensDistortionLookup = lensDistortionLookup
+            self.inverseLensDistortionLookup = inverseLensDistortionLookup
 
             self.intrinsic = np.array(data["intrinsic"]).reshape((3,3))
             self.intrinsic = self.intrinsic.transpose()
@@ -61,11 +56,12 @@ class ImageDepth:
             self.intrinsic[1,2] *= self.scale
 
     def create_undistortion_lookup(self):
-        xy = [(x,y) for y in range(0, self.height) for x in range(0, self.width)]
-        xy = np.array(xy, dtype=np.float32).reshape(-1,2)
+        xy_pos = [(x,y) for y in range(0, self.height) for x in range(0, self.width)]
+        xy = np.array(xy_pos, dtype=np.float32).reshape(-1,2)
 
         # subtract center
-        xy -= self.intrinsic[0:1, 2]
+        center = self.intrinsic[0:1, 2]
+        xy -= center
 
         # calc radius from center
         r = np.sqrt(xy[:,0]**2 + xy[:,1]**2)
@@ -75,50 +71,48 @@ class ImageDepth:
         norm_r = r / max_r
 
         # interpolate the magnification
-        # this seems really silly ...
-        num = len(self.inverseLensDistortion)
-        magnification = np.interp(norm_r*num, np.arange(0, num), self.inverseLensDistortion)
+        table = self.inverseLensDistortionLookup
+        num = len(table)
+        magnification = 1.0 + np.interp(norm_r*num, np.arange(0, num), table)
 
-        print(self.inverseLensDistortion)
-        print(magnification)
         # unit vector
         magnititude = np.expand_dims(np.sqrt(xy[:,0]**2 + xy[:,1]**2), 1)
         unit_xy = xy / magnititude
 
         new_xy = unit_xy * magnititude * np.expand_dims(magnification, 1)
-        print(new_xy)
-        #print(xy.shape)
+        new_xy += center
+
+        self.map_x = new_xy[:,0].reshape((self.height, self.width)).astype(np.float32)
+        self.map_y = new_xy[:,1].reshape((self.height, self.width)).astype(np.float32)
 
     def load_depth(self, file, max_distance):
-        depth = np.fromfile(file, dtype='float16')
+        depth = np.fromfile(file, dtype='float16').astype(np.float32)
 
         # vectorize version, faster
         # all possible (x,y) position
-        xyz = [(x,y,1.0) for y in range(0, self.height) for x in range(0, self.width)]
-        xyz = np.array(xyz)
+        xy = [(x,y) for y in range(0, self.height) for x in range(0, self.width)]
+        xy = np.array(xy).astype(np.float32)
 
         # remove bad values
         no_nan = np.invert(np.isnan(depth))
         good_range = depth < max_distance
         idx = np.logical_and(no_nan, good_range)
-        xyz = xyz[np.where(idx)]
+        xy = xy[np.where(idx)]
 
         # mask out depth buffer
-        self.mask = idx
         self.depth_map = depth
-        self.depth_map[np.where(idx == False)] = 0
+        self.depth_map[np.where(idx == False)] = -1000
         self.depth_map = self.depth_map.reshape((self.height, self.width, 1))
+        self.depth_map_undistort = cv.remap(self.depth_map, self.map_x, self.map_y, cv.INTER_LINEAR)
 
         per = float(np.sum(idx==True))/len(depth)
         print(f"Processing {file}, keeping={np.sum(idx==True)}/{len(depth)} ({per:.3f}) points")
 
-        depth = np.expand_dims(depth[np.where(idx)],1)
+        depth = np.expand_dims(self.depth_map_undistort.flatten()[np.where(idx)],1)
 
         # project to 3D
-        xyz = np.linalg.inv(self.intrinsic) @ xyz.transpose()
-
-        # apply depth
-        xyz = xyz.transpose() * (depth*3)
+        xyz, _, good_idx = self.project3d(xy)
+        xyz = xyz[good_idx]
 
         self.pcd = o3d.geometry.PointCloud()
         self.pcd.points = o3d.utility.Vector3dVector(xyz)
@@ -127,34 +121,20 @@ class ImageDepth:
         self.pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=self.normal_radius, max_nn=10))
 
     def load_image(self, file):
-        img = np.fromfile(file, dtype='uint8')
-        img = img.reshape((self.height, self.width, 4))
-        img = img[:,:,0:3]
+        self.img = np.fromfile(file, dtype='uint8')
+        self.img = self.img.reshape((self.height, self.width, 4))
+        self.img = self.img[:,:,0:3]
 
         # swap RB
-        self.img = img[:,:,[2,1,0]]
-        self.gray = cv.cvtColor(img, cv.COLOR_RGB2GRAY)
+        #self.img = img[:,:,[2,1,0]]
+        self.gray = cv.cvtColor(self.img, cv.COLOR_RGB2GRAY)
 
-    def preprocess_point_cloud(self, pcd, voxel_size):
-        #print("  Downsample with a voxel size %.3f." % voxel_size)
-        pcd_down = pcd.voxel_down_sample(voxel_size)
+        self.img_undistort = cv.remap(self.img, self.map_x, self.map_y, cv.INTER_LINEAR)
+        self.gray_undistort = cv.remap(self.gray, self.map_x, self.map_y, cv.INTER_LINEAR)
 
-        radius_normal = voxel_size * 2
-        #print("  Estimate normal with search radius %.3f." % radius_normal)
-        pcd_down.estimate_normals(
-            o3d.geometry.KDTreeSearchParamHybrid(radius=radius_normal, max_nn=30))
+    def project3d(self, pts):
+        # epxect pts to be Nx2
 
-        radius_feature = voxel_size * 5
-        #print("  Compute FPFH feature with search radius %.3f." % radius_feature)
-        pcd_fpfh = o3d.registration.compute_fpfh_feature(
-            pcd_down,
-            o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100))
-
-        return pcd_down, pcd_fpfh
-
-    def get_point3d(self, pts):
-        # pts as array of (x,y)
-        # round to nearest integer
         xy = np.round(pts).astype(np.int)
 
         fx = self.intrinsic[0,0]
@@ -162,13 +142,13 @@ class ImageDepth:
         cx = self.intrinsic[0,2]
         cy = self.intrinsic[1,2]
 
-        depths = self.depth_map[xy[:,1], xy[:,0]]
-        good_idx, _ = np.where(depths > 0)
+        depths = self.depth_map_undistort[xy[:,1], xy[:,0]]
+        depths = np.expand_dims(depths, 1)
+        good_idx = np.where(depths > 0)[0]
 
         pts -= np.array([cx, cy])
         pts /= np.array([fx, fy])
         pts *= depths
-
         pts = np.hstack((pts, depths))
 
         return pts, xy, good_idx
