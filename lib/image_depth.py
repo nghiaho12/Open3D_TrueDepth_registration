@@ -152,18 +152,23 @@ class ImageDepth:
 
         return pcd_down, pcd_fpfh
 
-    def get_point3d(self, x, y):
+    def get_point3d(self, pts):
+        # pts as array of (x,y)
+        # round to nearest integer
+        xy = np.round(pts).astype(np.int)
+
         fx = self.intrinsic[0,0]
         fy = self.intrinsic[1,1]
         cx = self.intrinsic[0,2]
         cy = self.intrinsic[1,2]
 
-        xf = (x - cx)/fx
-        yf = (y - cy)/fy
+        depths = self.depth_map[xy[:,1], xy[:,0]]
+        good_idx, _ = np.where(depths > 0)
 
-        depth = self.depth_map[y, x]
+        pts -= np.array([cx, cy])
+        pts /= np.array([fx, fy])
+        pts *= depths
 
-        if depth > 0:
-            return np.array([xf*depth, yf*depth, depth]).reshape(1, 3)
+        pts = np.hstack((pts, depths))
 
-        return None
+        return pts, xy, good_idx
