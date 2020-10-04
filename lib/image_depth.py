@@ -12,8 +12,9 @@ class ImageDepth:
         depth_file,
         width=640,
         height=480,
-        max_distance=0.5,
-        distance_threshold=0.1,
+        min_depth=0.1,
+        max_depth=0.5,
+        distance_threshold=0.02,
         normal_radius=0.1):
 
         self.image_file = image_file
@@ -21,7 +22,8 @@ class ImageDepth:
         self.depth_file = depth_file
         self.width = width
         self.height = height
-        self.max_distance = max_distance
+        self.min_depth = min_depth
+        self.max_depth = max_depth
         self.distance_threshold = distance_threshold
         self.normal_radius = normal_radius
 
@@ -29,7 +31,7 @@ class ImageDepth:
         self.create_undistortion_lookup()
 
         self.load_image(image_file)
-        self.load_depth(depth_file, max_distance)
+        self.load_depth(depth_file)
 
     def load_calibration(self, file):
         with open(file) as f:
@@ -85,7 +87,7 @@ class ImageDepth:
         self.map_x = new_xy[:,0].reshape((self.height, self.width)).astype(np.float32)
         self.map_y = new_xy[:,1].reshape((self.height, self.width)).astype(np.float32)
 
-    def load_depth(self, file, max_distance):
+    def load_depth(self, file,):
         depth = np.fromfile(file, dtype='float16').astype(np.float32)
 
         # vectorize version, faster
@@ -95,8 +97,9 @@ class ImageDepth:
 
         # remove bad values
         no_nan = np.invert(np.isnan(depth))
-        good_range = depth < max_distance
-        idx = np.logical_and(no_nan, good_range)
+        depth1 = depth > self.min_depth
+        depth2 = depth < self.max_depth
+        idx = no_nan & depth1 & depth2
         xy = xy[np.where(idx)]
 
         # mask out depth buffer
@@ -144,7 +147,7 @@ class ImageDepth:
 
         depths = self.depth_map_undistort[xy[:,1], xy[:,0]]
         depths = np.expand_dims(depths, 1)
-        good_idx = np.where(depths > 0)[0]
+        good_idx = np.where((depths > self.min_depth) & (depths < self.max_depth))[0]
 
         pts -= np.array([cx, cy])
         pts /= np.array([fx, fy])

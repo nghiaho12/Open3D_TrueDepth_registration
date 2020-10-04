@@ -49,8 +49,9 @@ def rigid_transform_3D(A, B):
 
     t = -R@centroid_A + centroid_B
 
-    err = B - R@A + t
-    err = np.sum(err**2, 0)
+    err = B - (R@A + t)
+    err = err**2
+    err = err.flatten()
     rmse = np.sqrt(np.mean(err))
 
     return R, t, rmse

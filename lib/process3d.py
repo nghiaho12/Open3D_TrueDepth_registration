@@ -12,8 +12,8 @@ from . rigid_transform_3D import rigid_transform_3D
 from . image_depth import ImageDepth
 
 def process3d(args):
-    image_files = sorted(glob.glob(f"{args.folder}/video*.bin"))[18:22]
-    depth_files = sorted(glob.glob(f"{args.folder}/depth*.bin"))[18:22]
+    image_files = sorted(glob.glob(f"{args.folder}/video*.bin")) #[18:22]
+    depth_files = sorted(glob.glob(f"{args.folder}/depth*.bin")) #[18:22]
     calibration_file =f"{args.folder}/calibration.json"
 
     if len(image_files) == 0:
@@ -41,7 +41,8 @@ def process3d(args):
             depth_file,
             args.width,
             args.height,
-            args.max_distance,
+            args.min_depth,
+            args.max_depth,
             args.distance_threshold,
             args.normal_radius)
 
@@ -100,6 +101,7 @@ def process3d(args):
 
             # find common good points
             good_idx = np.intersect1d(prev_good_idx, cur_good_idx)
+
             prev_3d = prev_3d[good_idx]
             prev_2d = prev_2d[good_idx]
             cur_3d = cur_3d[good_idx]
@@ -111,7 +113,7 @@ def process3d(args):
             delta[0:3, 3:4] = t
             print("vision delta")
             print(delta)
-            print("rmse:", rmse)
+            print("vision rmse:", rmse)
             img = cv.cvtColor(cur.gray_undistort, cv.COLOR_GRAY2BGR)
 
             for a, b in zip(prev_2d, cur_2d):
@@ -119,11 +121,9 @@ def process3d(args):
                 bb = (b[0].item(), b[1].item())
                 img = cv.line(img, aa, bb, (0,0,255))
 
-            #cv.imwrite("a.png", cur.img)
-            #cv.imwrite("b.png", cur.img_undistort)
             if args.viz:
                 cv.imshow("cur", img)
-                cv.waitKey(0)
+                cv.waitKey(1)
 
         guess = last_transform @ delta
         reg = o3d.registration.registration_icp(
