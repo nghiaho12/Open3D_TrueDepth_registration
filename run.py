@@ -14,7 +14,7 @@ if __name__ == "__main__":
     parser.add_argument('--max_depth', type=float, default=0.5, help='max depth distance (meters)')
     parser.add_argument('--distance_threshold', type=float, default=0.02, help='for ICP (meters)')
     parser.add_argument('--normal_radius', type=float, default=0.1, help='max radius for normal calculation (meters)')
-    parser.add_argument('--vis_tracking', type=boo,l default=True, help='visual tracking, use RGB images to help with registration')
+    parser.add_argument('--vis_tracking', type=bool, default=True, help='visual tracking, use RGB images to help with registration')
 
     args = parser.parse_args()
 
