@@ -15,7 +15,8 @@ class ImageDepth:
         height=480,
         min_depth=0.1,
         max_depth=0.5,
-        normal_radius=0.1):
+        normal_radius=0.1,
+        use_RGB=True) :
 
         self.image_file = image_file
         self.calibration_file = calibration_file
@@ -25,12 +26,14 @@ class ImageDepth:
         self.min_depth = min_depth
         self.max_depth = max_depth
         self.normal_radius = normal_radius
-        self.pose = np.eye(4, 4) # gets modified by external
+        self.pose = np.eye(4, 4)
 
         self.load_calibration(calibration_file)
         self.create_undistortion_lookup()
 
-        self.load_image(image_file)
+        if use_RGB:
+            self.load_image(image_file)
+
         self.load_depth(depth_file)
 
     def load_calibration(self, file):
@@ -117,7 +120,7 @@ class ImageDepth:
         self.pcd.points = o3d.utility.Vector3dVector(xyz)
 
         # calc normal, required for ICP point-to-plane
-        #self.pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=self.normal_radius, max_nn=10))
+        self.pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=self.normal_radius, max_nn=10))
 
     def load_image(self, file):
         print(f"Loading {file}")

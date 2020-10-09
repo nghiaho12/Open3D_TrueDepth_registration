@@ -31,11 +31,9 @@ def process3d(args):
     colors = plt.cm.jet(val)
     colors = colors[:, 0:3]
 
-    # final global point cloud
-    global_pcd = None
     point_clouds = []
 
-    # load all the point clouds into memory
+    # load data
     for i, (image_file, depth_file) in enumerate(zip(image_files, depth_files)):
         obj = ImageDepth(
             calibration_file,
@@ -45,65 +43,63 @@ def process3d(args):
             args.height,
             args.min_depth,
             args.max_depth,
-            args.normal_radius)
+            args.normal_radius,
+            args.use_vision)
 
         obj.pcd.paint_uniform_color(colors[i])
 
         point_clouds.append(obj)
 
+    if args.use_vision:
+        sift = cv.SIFT_create()
 
-    sift = cv.SIFT_create()
+        # run SIFT on all the images
+        for cur in point_clouds:
+            print(f"Running SIFT on {cur.image_file}")
+            cur.kp, cur.desc = sift.detectAndCompute(cur.gray_undistort, None)
 
-    # run SIFT on all the images
-    for cur in point_clouds:
-        print(f"Running SIFT on {cur.image_file}")
-        cur.kp, cur.desc = sift.detectAndCompute(cur.gray_undistort, None)
+        all_matches = dict()
 
-    all_matches = dict()
+        # match all pairings
+        # NOTE: This is highly parallelisable!!!
+        for i in range(0, len(point_clouds)):
+            all_matches[i] = dict()
+            pc_i = point_clouds[i]
 
-    # match all pairings
-    # NOTE: This is highly parallelisable!!!
-    for i in range(0, len(point_clouds)):
-        all_matches[i] = dict()
-        pc_i = point_clouds[i]
+            if args.max_look_ahead > len(point_clouds) or args.max_look_ahead <= 0:
+                # all matches
+                js = range(i+1, len(point_clouds))
+            else:
+                js = []
+                for k in range(0, args.max_look_ahead):
+                    js.append((i+1+k) % len(point_clouds))
 
-        if args.max_look_ahead > len(point_clouds) or args.max_look_ahead <= 0:
-            # all matches
-            js = range(i+1, len(point_clouds))
-        else:
-            js = []
-            for k in range(0, args.max_look_ahead):
-                js.append((i+1+k) % len(point_clouds))
+            for j in js:
+                pc_j = point_clouds[j]
+                i_pts, j_pts = find_sift_matches(pc_i.kp, pc_i.desc, pc_j.kp, pc_j.desc)
 
-        for j in js:
-            pc_j = point_clouds[j]
-            i_pts, j_pts = find_sift_matches(pc_i.kp, pc_i.desc, pc_j.kp, pc_j.desc)
+                # geometric constraint
+                _, mask = cv.findFundamentalMat(np.array(i_pts), np.array(j_pts), cv.FM_RANSAC, 3.0)
 
-            # geometric constraint
-            _, mask = cv.findFundamentalMat(np.array(i_pts), np.array(j_pts), cv.FM_RANSAC, 3.0)
+                mask = mask.squeeze()
+                i_pts = np.array(i_pts)[np.where(mask)]
+                j_pts = np.array(j_pts)[np.where(mask)]
 
-            mask = mask.squeeze()
-            i_pts = np.array(i_pts)[np.where(mask)]
-            j_pts = np.array(j_pts)[np.where(mask)]
+                # find common good points
+                i_3d, i_2d, i_good_idx = pc_i.project3d(i_pts)
+                j_3d, j_2d, j_good_idx = pc_j.project3d(j_pts)
+                good_idx = np.intersect1d(i_good_idx, j_good_idx)
 
-            # find common good points
-            i_3d, i_2d, i_good_idx = pc_i.project3d(i_pts)
-            j_3d, j_2d, j_good_idx = pc_j.project3d(j_pts)
-            good_idx = np.intersect1d(i_good_idx, j_good_idx)
+                i_3d = i_3d[good_idx]
+                i_2d = i_2d[good_idx]
+                j_3d = j_3d[good_idx]
+                j_2d = j_2d[good_idx]
 
-            i_3d = i_3d[good_idx]
-            i_2d = i_2d[good_idx]
-            j_3d = j_3d[good_idx]
-            j_2d = j_2d[good_idx]
+                all_matches[i][j] = (i_2d, i_3d, j_2d, j_3d)
 
-            all_matches[i][j] = (i_2d, i_3d, j_2d, j_3d)
+                print(f"Matching {pc_i.image_file} {pc_j.image_file}, matches: {len(i_3d)}")
 
-            print(f"Matching {pc_i.image_file} {pc_j.image_file}, matches: {len(i_3d)}")
-
-    global_pcd = point_clouds[0].pcd
-    lase_pose = np.eye(4,4)
-
-    # run sequential registration to initialize the camera pose
+    # run sequential matching to initialize the camera poses
     for i in range(1, len(point_clouds)):
         prev = point_clouds[i-1]
         cur = point_clouds[i]
@@ -112,7 +108,7 @@ def process3d(args):
 
         delta_pose = np.eye(4, 4)
 
-        if args.vis_tracking:
+        if args.use_vision:
             prev_2d, prev_3d, cur_2d, cur_3d = all_matches[i-1][i]
 
             R, t, rmse = rigid_transform_3D(cur_3d.transpose(), prev_3d.transpose())
@@ -133,62 +129,65 @@ def process3d(args):
                 cv.imshow("cur", img)
                 cv.waitKey(50)
 
-        pose = lase_pose @ delta_pose
-
-        if args.seq_icp:
+        if args.use_icp or not args.use_vision:
+            guess = np.eye(4,4)
             reg = o3d.registration.registration_icp(
                 cur.pcd,
-                global_pcd,
+                prev.pcd,
                 args.distance_threshold,
-                pose,
+                guess,
                 o3d.registration.TransformationEstimationPointToPlane())
 
-            pose = reg.transform
+            delta_pose = reg.transformation
+            #print(delta_pose)
 
-        # apply transform and merge point cloud
-        cur.pose = pose
-        lase_pose = pose
+        cur.pose = prev.pose @ delta_pose
 
-    # setup pose graph for optimization
-    poses = np.zeros((len(point_clouds), 7))
-    for i, p in enumerate(point_clouds):
-        r = Rotation.from_matrix(p.pose[0:3,0:3])
-        r = r.as_quat()
+    if args.use_vision:
+        # setup pose graph for optimization
+        poses = np.zeros((len(point_clouds), 7))
+        for i, p in enumerate(point_clouds):
+            r = Rotation.from_matrix(p.pose[0:3,0:3])
+            r = r.as_quat()
 
-        qx = r[0]
-        qy = r[1]
-        qz = r[2]
-        qw = r[3]
+            qx = r[0]
+            qy = r[1]
+            qz = r[2]
+            qw = r[3]
 
-        poses[i, 0:4] = np.array([qw, qx, qy, qz])
-        poses[i, 4:7] = p.pose[0:3,3]
+            poses[i, 0:4] = np.array([qw, qx, qy, qz])
+            poses[i, 4:7] = p.pose[0:3,3]
 
-    matches = np.zeros((0, 8))
-    for idx1 in all_matches:
-        for idx2 in all_matches[idx1]:
-            i_2d, i_3d, j_2d, j_3d = all_matches[idx1][idx2]
+        matches = np.zeros((0, 8))
+        for idx1 in all_matches:
+            for idx2 in all_matches[idx1]:
+                i_2d, i_3d, j_2d, j_3d = all_matches[idx1][idx2]
 
-            if len(i_3d) > args.min_matches:
-                for p, c in zip(i_3d, j_3d):
-                    r = np.array([idx1, idx2, p[0], p[1], p[2], c[0], c[1], c[2]])
-                    matches = np.vstack((matches, r))
+                if len(i_3d) > args.min_matches:
+                    for p, c in zip(i_3d, j_3d):
+                        r = np.array([idx1, idx2, p[0], p[1], p[2], c[0], c[1], c[2]])
+                        matches = np.vstack((matches, r))
 
-    optim_poses = pose_graph(poses, matches)
+        optim_poses = pose_graph(poses, matches)
+
+        for pc, optim_pose in zip(point_clouds, optim_poses):
+            qw, qx, qy, qz = optim_pose[0:4]
+            tx, ty, tz = optim_pose[4:7]
+
+            r = Rotation.from_quat([qx, qy, qz, qw])
+
+            pose = np.eye(4,4)
+            pose[0:3,0:3] = r.as_matrix()
+            pose[0,3] = tx
+            pose[1,3] = ty
+            pose[2,3] = tz
+
+            pc.pose = pose
+
+    global_pcd = None
 
     for i, pc in enumerate(point_clouds):
-        qw, qx, qy, qz = optim_poses[i][0:4]
-        tx, ty, tz = optim_poses[i][4:7]
-
-        r = Rotation.from_quat([qx, qy, qz, qw])
-
-        transform = np.eye(4,4)
-        transform[0:3,0:3] = r.as_matrix()
-        transform[0,3] = tx
-        transform[1,3] = ty
-        transform[2,3] = tz
-
-        #print(transform)
-        pc.pcd.transform(transform)
+        pc.pcd.transform(pc.pose)
 
         if global_pcd is None:
             global_pcd = pc.pcd

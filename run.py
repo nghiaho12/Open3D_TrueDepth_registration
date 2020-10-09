@@ -6,7 +6,7 @@ if __name__ == "__main__":
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     parser.add_argument('folder', help='folder containing bins and camera calibration')
-    parser.add_argument('--viz', type=bool, default=True, help='visualize result')
+    parser.add_argument('--viz', type=int, default=1, help='visualize result')
     parser.add_argument('--output', default="output.ply", help='save PLY file')
     parser.add_argument('--width', type=int, default=640, help='image width')
     parser.add_argument('--height', type=int, default=480, help='image height')
@@ -16,8 +16,8 @@ if __name__ == "__main__":
     parser.add_argument('--normal_radius', type=float, default=0.1, help='max radius for normal calculation (meters)')
     parser.add_argument('--min_matches', type=int, default=100, help='min matches for visual feature matching')
     parser.add_argument('--max_look_ahead', type=int, default=10, help='max images to look ahead for visual feature matching, set -1 to match all (SLOW!)')
-    parser.add_argument('--seq_icp', type=bool, default=False, help='use sequential ICP registration when estimating camera pose, else it uses the vision estimate')
-    parser.add_argument('--vis_tracking', type=bool, default=True, help='visual tracking, use RGB images to help with registration')
+    parser.add_argument('--use_icp', type=int, default=1, help='use ICP registration to estimate camera pose, can be used inconjunction with --use_vision')
+    parser.add_argument('--use_vision', type=int, default=1, help='use RGB + depth images to estimate camera pose')
 
     args = parser.parse_args()
 
