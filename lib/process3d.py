@@ -195,6 +195,11 @@ def process3d(args):
         else:
             global_pcd += pc.pcd
 
+    # poisson mesh
+    #
+    #global_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.05, max_nn=10))
+    #mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(global_pcd, depth=9)
+
     # save the points
     # remove normals to save space
     #empty_array = np.zeros((1,3), dtype=np.float64)

@@ -72,17 +72,12 @@ class ImageDepth:
         max_r = np.max(r)
         norm_r = r / max_r
 
-        # interpolate the magnification
+        # interpolate the scale
         table = self.inverseLensDistortionLookup
         num = len(table)
-        magnification = 1.0 + np.interp(norm_r*num, np.arange(0, num), table)
+        scale = 1.0 + np.interp(norm_r*num, np.arange(0, num), table)
 
-        # unit vector
-        magnititude = np.expand_dims(np.sqrt(xy[:,0]**2 + xy[:,1]**2), 1)
-        unit_xy = xy / magnititude
-
-        new_xy = unit_xy * magnititude * np.expand_dims(magnification, 1)
-        new_xy += center
+        new_xy = xy*np.expand_dims(scale, 1) + center
 
         self.map_x = new_xy[:,0].reshape((self.height, self.width)).astype(np.float32)
         self.map_y = new_xy[:,1].reshape((self.height, self.width)).astype(np.float32)
