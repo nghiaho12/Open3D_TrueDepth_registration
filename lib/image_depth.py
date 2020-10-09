@@ -4,6 +4,7 @@ import cv2 as cv
 import json
 import struct
 import base64
+import time
 
 class ImageDepth:
     def __init__(self,
@@ -24,6 +25,7 @@ class ImageDepth:
         self.min_depth = min_depth
         self.max_depth = max_depth
         self.normal_radius = normal_radius
+        self.pose = np.eye(4, 4) # gets modified by external
 
         self.load_calibration(calibration_file)
         self.create_undistortion_lookup()
@@ -86,6 +88,7 @@ class ImageDepth:
         self.map_y = new_xy[:,1].reshape((self.height, self.width)).astype(np.float32)
 
     def load_depth(self, file,):
+        t = time.time()
         depth = np.fromfile(file, dtype='float16').astype(np.float32)
 
         # vectorize version, faster
@@ -119,9 +122,10 @@ class ImageDepth:
         self.pcd.points = o3d.utility.Vector3dVector(xyz)
 
         # calc normal, required for ICP point-to-plane
-        self.pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=self.normal_radius, max_nn=10))
+        #self.pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=self.normal_radius, max_nn=10))
 
     def load_image(self, file):
+        print(f"Loading {file}")
         self.img = np.fromfile(file, dtype='uint8')
         self.img = self.img.reshape((self.height, self.width, 4))
         self.img = self.img[:,:,0:3]
