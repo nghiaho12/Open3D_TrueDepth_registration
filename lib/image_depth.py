@@ -15,8 +15,7 @@ class ImageDepth:
         height=480,
         min_depth=0.1,
         max_depth=0.5,
-        normal_radius=0.1,
-        use_RGB=True) :
+        normal_radius=0.1) :
 
         self.image_file = image_file
         self.calibration_file = calibration_file
@@ -31,9 +30,7 @@ class ImageDepth:
         self.load_calibration(calibration_file)
         self.create_undistortion_lookup()
 
-        if use_RGB:
-            self.load_image(image_file)
-
+        self.load_image(image_file)
         self.load_depth(depth_file)
 
     def load_calibration(self, file):
@@ -100,6 +97,7 @@ class ImageDepth:
         depth2 = depth < self.max_depth
         idx = no_nan & depth1 & depth2
         xy = xy[np.where(idx)]
+        rgb = self.img_undistort.reshape(-1, 3)[np.where(idx)] / 255.0
 
         # mask out depth buffer
         self.depth_map = depth
@@ -115,9 +113,11 @@ class ImageDepth:
         # project to 3D
         xyz, _, good_idx = self.project3d(xy)
         xyz = xyz[good_idx]
+        rgb = rgb[good_idx]
 
         self.pcd = o3d.geometry.PointCloud()
         self.pcd.points = o3d.utility.Vector3dVector(xyz)
+        self.pcd.colors = o3d.utility.Vector3dVector(rgb)
 
         # calc normal, required for ICP point-to-plane
         self.pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=self.normal_radius, max_nn=10))
@@ -129,7 +129,7 @@ class ImageDepth:
         self.img = self.img[:,:,0:3]
 
         # swap RB
-        #self.img = img[:,:,[2,1,0]]
+        self.img = self.img[:,:,[2,1,0]]
         self.gray = cv.cvtColor(self.img, cv.COLOR_RGB2GRAY)
 
         self.img_undistort = cv.remap(self.img, self.map_x, self.map_y, cv.INTER_LINEAR)
