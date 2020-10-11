@@ -120,7 +120,8 @@ class ImageDepth:
         self.pcd.colors = o3d.utility.Vector3dVector(rgb)
 
         # calc normal, required for ICP point-to-plane
-        self.pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=self.normal_radius, max_nn=10))
+        self.pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=self.normal_radius, max_nn=30))
+        self.pcd.orient_normals_towards_camera_location()
 
     def load_image(self, file):
         print(f"Loading {file}")

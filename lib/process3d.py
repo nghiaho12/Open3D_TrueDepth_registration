@@ -77,7 +77,6 @@ def process3d(args):
 
     if args.mesh:
         print("Meshing ...")
-        global_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.01, max_nn=30))
         mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(global_pcd, depth=args.mesh_depth)
 
         o3d.io.write_triangle_mesh(args.output, mesh)
