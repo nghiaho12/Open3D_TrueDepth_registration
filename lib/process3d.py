@@ -119,26 +119,31 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
             pc_j = point_clouds[j]
             i_pts, j_pts = find_sift_matches(pc_i.kp, pc_i.desc, pc_j.kp, pc_j.desc)
 
+            if len(i_pts) == 0:
+                print(f"Matching {pc_i.image_file} {pc_j.image_file}, matches: 0")
+                continue
+
             # geometric constraint
             _, mask = cv.findFundamentalMat(np.array(i_pts), np.array(j_pts), cv.FM_RANSAC, 3.0)
 
-            mask = mask.squeeze()
-            i_pts = np.array(i_pts)[np.where(mask)]
-            j_pts = np.array(j_pts)[np.where(mask)]
+            if mask is not None:
+                mask = mask.squeeze()
+                i_pts = np.array(i_pts)[np.where(mask)]
+                j_pts = np.array(j_pts)[np.where(mask)]
 
-            # find common good points
-            i_3d, i_2d, i_good_idx = pc_i.project3d(i_pts)
-            j_3d, j_2d, j_good_idx = pc_j.project3d(j_pts)
-            good_idx = np.intersect1d(i_good_idx, j_good_idx)
+                # find common good points
+                i_3d, i_2d, i_good_idx = pc_i.project3d(i_pts)
+                j_3d, j_2d, j_good_idx = pc_j.project3d(j_pts)
+                good_idx = np.intersect1d(i_good_idx, j_good_idx)
 
-            i_3d = i_3d[good_idx]
-            i_2d = i_2d[good_idx]
-            j_3d = j_3d[good_idx]
-            j_2d = j_2d[good_idx]
+                i_3d = i_3d[good_idx]
+                i_2d = i_2d[good_idx]
+                j_3d = j_3d[good_idx]
+                j_2d = j_2d[good_idx]
 
-            all_matches[i][j] = (i_2d, i_3d, j_2d, j_3d)
+                all_matches[i][j] = (i_2d, i_3d, j_2d, j_3d)
 
-            print(f"Matching {pc_i.image_file} {pc_j.image_file}, matches: {len(i_3d)}")
+                print(f"Matching {pc_i.image_file} {pc_j.image_file}, matches: {len(i_3d)}")
 
     # run sequential matching to initialize the camera poses
     for i in range(1, len(point_clouds)):
@@ -168,7 +173,7 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
                 img = cv.line(img, aa, bb, (0,0,255))
 
             cv.imshow("cur", img)
-            cv.waitKey(50)
+            cv.waitKey(0)
 
     if pose_graph_optimzation:
         print("Running pose graph optimization")
