@@ -2,12 +2,22 @@ import argparse
 from lib.process3d import process3d
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='TrueDepth camera point cloud registration',
+    class ArgumentParserWithDefaults(argparse.ArgumentParser):
+        def add_argument(self, *args, help=None, default=None, **kwargs):
+            if help is not None:
+                kwargs['help'] = help
+            if default is not None and args[0] != '-h':
+                kwargs['default'] = default
+                if help is not None:
+                    kwargs['help'] += ' (default: {})'.format(default)
+            super().add_argument(*args, **kwargs)
+
+    parser = ArgumentParserWithDefaults(description='TrueDepth camera point cloud registration',
         formatter_class=argparse.RawTextHelpFormatter)
 
     parser.add_argument('folder', help='folder containing bins and camera calibration')
     parser.add_argument('--viz', type=int, default=1, help='visualize result')
-    parser.add_argument('--method', type=int, default=0, help='Registration method\n0: global vision based (2d/3d with pose graph optimization)\n1: sequential vision based (2d/3d)\n2: sequential ICP (3d only)')
+    parser.add_argument('--method', type=int, default=0, help='Registration method\n0: global vision based (2d/3d with pose graph optimization)\n1: sequential vision based (2d/3d)\n2: sequential ICP (3d only)\n')
     parser.add_argument('--output', default="output.ply", help='save PLY file')
     parser.add_argument('--width', type=int, default=640, help='image width')
     parser.add_argument('--height', type=int, default=480, help='image height')
