@@ -173,7 +173,7 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
                 img = cv.line(img, aa, bb, (0,0,255))
 
             cv.imshow("cur", img)
-            cv.waitKey(0)
+            cv.waitKey(20)
 
     if pose_graph_optimzation:
         print("Running pose graph optimization")
