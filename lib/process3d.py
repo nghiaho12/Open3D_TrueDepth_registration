@@ -73,20 +73,27 @@ def process3d(args):
         else:
             global_pcd += pc.pcd
 
-    # poisson mesh
-    #global_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.05, max_nn=10))
-    #mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(global_pcd, depth=9)
-
-    # save the points
-    # remove normals to save space
-    #empty_array = np.zeros((1,3), dtype=np.float64)
-    #global_pcd.normals = o3d.utility.Vector3dVector(empty_array)
-
     print(f"Saving to {args.output} ...")
-    o3d.io.write_point_cloud(args.output, global_pcd)
 
-    if args.viz:
-        custom_draw_geometry([global_pcd])
+    if args.mesh:
+        print("Meshing ...")
+        global_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.01, max_nn=30))
+        mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(global_pcd, depth=args.mesh_depth)
+
+        o3d.io.write_triangle_mesh(args.output, mesh)
+
+        if args.viz:
+            custom_draw_geometry([mesh])
+    else:
+        # save the points
+        # remove normals to save space
+        #empty_array = np.zeros((1,3), dtype=np.float64)
+        #global_pcd.normals = o3d.utility.Vector3dVector(empty_array)
+
+        o3d.io.write_point_cloud(args.output, global_pcd)
+
+        if args.viz:
+            custom_draw_geometry([global_pcd])
 
 def match_features(args, pc_i, pc_j):
     i_pts, j_pts = find_sift_matches(pc_i.kp, pc_i.desc, pc_j.kp, pc_j.desc)

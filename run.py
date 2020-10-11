@@ -19,6 +19,8 @@ if __name__ == "__main__":
     parser.add_argument('--loop_closure_range', type=int, default=10, help='search N images from the start to find a loop closure with the last image')
     parser.add_argument('--uniform_color', type=int, default=0, help='use uniform color for point instead of RGB image')
     parser.add_argument('--max_vision_rmse', type=float, default=0.04, help='max rmse when estimating pose using vision')
+    parser.add_argument('--mesh', type=int, default=0, help='make a mesh instead of point cloud')
+    parser.add_argument('--mesh_depth', type=int, default=10, help='Poisson reconstruction depth, higher results in more detail')
 
     args = parser.parse_args()
 
