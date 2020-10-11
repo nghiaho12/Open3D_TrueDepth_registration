@@ -79,6 +79,15 @@ def process3d(args):
         print("Meshing ...")
         mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(global_pcd, depth=args.mesh_depth)
 
+        if args.keep_largest_mesh:
+            print("Finding the largest mesh ...")
+            with o3d.utility.VerbosityContextManager(o3d.utility.VerbosityLevel.Debug) as cm:
+                triangle_clusters, cluster_n_triangles, cluster_area = mesh.cluster_connected_triangles()
+
+                largest_cluster_idx = np.array(cluster_n_triangles).argmax()
+                triangles_to_remove = triangle_clusters != largest_cluster_idx
+                mesh.remove_triangles_by_mask(triangles_to_remove)
+
         o3d.io.write_triangle_mesh(args.output, mesh)
 
         if args.viz:

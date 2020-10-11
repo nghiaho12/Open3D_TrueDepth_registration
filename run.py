@@ -31,6 +31,7 @@ if __name__ == "__main__":
     parser.add_argument('--max_vision_rmse', type=float, default=0.04, help='max rmse when estimating pose using vision')
     parser.add_argument('--mesh', type=int, default=0, help='make a mesh instead of point cloud')
     parser.add_argument('--mesh_depth', type=int, default=10, help='Poisson reconstruction depth, higher results in more detail')
+    parser.add_argument('--keep_largest_mesh', type=int, default=0, help='keep only the largest mesh, useful for filtering noise')
 
     args = parser.parse_args()
 
