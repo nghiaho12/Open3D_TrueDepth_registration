@@ -88,6 +88,36 @@ def process3d(args):
     if args.viz:
         custom_draw_geometry([global_pcd])
 
+def match_features(args, pc_i, pc_j):
+    i_pts, j_pts = find_sift_matches(pc_i.kp, pc_i.desc, pc_j.kp, pc_j.desc)
+
+    # geometric constraint
+    _, mask = cv.findFundamentalMat(np.array(i_pts), np.array(j_pts), cv.FM_RANSAC, 3.0)
+
+    if mask is None:
+        return (None, None, None, None, None)
+
+    mask = mask.squeeze()
+    i_pts = np.array(i_pts)[np.where(mask)]
+    j_pts = np.array(j_pts)[np.where(mask)]
+
+    # find common good points
+    i_3d, i_2d, i_good_idx = pc_i.project3d(i_pts)
+    j_3d, j_2d, j_good_idx = pc_j.project3d(j_pts)
+    good_idx = np.intersect1d(i_good_idx, j_good_idx)
+
+    if len(good_idx) == 0:
+        return (None, None, None, None, None)
+
+    i_3d = i_3d[good_idx]
+    i_2d = i_2d[good_idx]
+    j_3d = j_3d[good_idx]
+    j_2d = j_2d[good_idx]
+
+    R, t, rmse = rigid_transform_3D(i_3d.transpose(), j_3d.transpose())
+
+    return i_2d, i_3d, j_2d, j_3d, rmse
+
 def vision_based_registration(args, point_clouds, pose_graph_optimzation):
     sift = cv.SIFT_create()
 
@@ -98,74 +128,64 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
 
     all_matches = dict()
 
-    if not pose_graph_optimzation:
-        args.search_range = 1
+    # match neighbouring pairs
+    for i in range(0, len(point_clouds)-1):
+        j = i+1
 
-    # match all pairings
-    # NOTE: This is highly parallelisable!!!
-    for i in range(0, len(point_clouds)):
         all_matches[i] = dict()
         pc_i = point_clouds[i]
-        i_image_file = Path(pc_i.image_file).name
+        pc_j = point_clouds[j]
 
-        if args.search_range > len(point_clouds) or args.search_range <= 0:
-            # all matches
-            js = range(i+1, len(point_clouds))
-        else:
-            js = []
-            for k in range(0, args.search_range):
-                js.append((i+1+k) % len(point_clouds))
+        i_2d, i_3d, j_2d, j_3d, rmse = match_features(args, pc_i, pc_j)
 
-        for j in js:
+        if i_2d is None:
+            print(f"Matching {pc_i.image_file} {pc_j.image_file}, matches: 0")
+            continue
+
+        print(f"Matching {pc_i.image_file} {pc_j.image_file}, matches: {len(i_2d)}, rmse: {rmse:.4f}")
+
+        if len(i_2d) < args.min_matches or rmse > args.max_vision_rmse:
+            print("   bad match!")
+            continue
+
+        all_matches[i][j] = (i_2d, i_3d, j_2d, j_3d)
+
+    if pose_graph_optimzation:
+        # find loop closure (if any) with the last image
+        print("Finding loop closure")
+        all_matches[len(point_clouds)-1] = dict()
+
+        best_num_match = 0
+        best_match = None
+        best_match_idx = 0
+
+        for j in range(0, args.loop_closure_range):
+            pc_i = point_clouds[-1]
             pc_j = point_clouds[j]
-            i_pts, j_pts = find_sift_matches(pc_i.kp, pc_i.desc, pc_j.kp, pc_j.desc)
-            j_image_file = Path(pc_j.image_file).name
+            i_2d, i_3d, j_2d, j_3d, rmse = match_features(args, pc_i, pc_j)
 
-            # geometric constraint
-            _, mask = cv.findFundamentalMat(np.array(i_pts), np.array(j_pts), cv.FM_RANSAC, 3.0)
-
-            if mask is None:
+            if i_2d is None:
+                print(f"Matching {pc_i.image_file} {pc_j.image_file}, matches: 0")
                 continue
 
-            if len(mask) < args.min_matches:
-                #print(f"Matching {i_image_file} {j_image_file}, matches: {len(i_pts)} < {args.min_matches}, skipping")
+            print(f"Matching {pc_i.image_file} {pc_j.image_file}, matches: {len(i_2d)}, rmse: {rmse:.4f}")
+
+            if len(i_2d) < args.min_matches or rmse > args.max_vision_rmse:
+                print("   bad match!")
                 continue
 
-            mask = mask.squeeze()
-            i_pts = np.array(i_pts)[np.where(mask)]
-            j_pts = np.array(j_pts)[np.where(mask)]
+            if len(i_2d) > best_num_match:
+                best_num_match = len(i_2d)
+                best_match = (i_2d, i_3d, j_2d, j_3d)
+                best_match_idx = j
 
-            # find common good points
-            i_3d, i_2d, i_good_idx = pc_i.project3d(i_pts)
-            j_3d, j_2d, j_good_idx = pc_j.project3d(j_pts)
-            good_idx = np.intersect1d(i_good_idx, j_good_idx)
-
-            if len(good_idx)  < args.min_matches:
-                #print(f"Matching {i_image_file} {j_image_file}, matches: {len(good_idx)} < {args.min_matches}, skipping")
-                continue
-
-            i_3d = i_3d[good_idx]
-            i_2d = i_2d[good_idx]
-            j_3d = j_3d[good_idx]
-            j_2d = j_2d[good_idx]
-
-            # one last sanity check
-            R, t, rmse = rigid_transform_3D(i_3d.transpose(), j_3d.transpose())
-
-            if rmse > args.max_vision_rmse:
-                #print(f"Matching {i_image_file} {j_image_file}, bad vision rmse: {rmse}")
-                continue
-
-            all_matches[i][j] = (i_2d, i_3d, j_2d, j_3d)
-
-            print(f"Matching {i_image_file} {j_image_file}, matches: {len(i_3d)}")
+        print(f"Best loop closure match {point_clouds[best_match_idx].image_file} matches: {best_num_match}")
+        all_matches[len(point_clouds)-1][best_match_idx] = best_match
 
     # run sequential matching to initialize the camera poses
     for i in range(1, len(point_clouds)):
         prev = point_clouds[i-1]
         cur = point_clouds[i]
-
-        print(cur.image_file)
 
         delta_pose = np.eye(4, 4)
 
@@ -175,6 +195,7 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
 
             delta_pose[0:3, 0:3] = R
             delta_pose[0:3, 3:4] = t
+            print(f"{cur.image_file} matches: {len(prev_3d)}")
         else:
             print(f"No matches for {prev.image_file} and {cur.image_file}, using identity pose")
 
