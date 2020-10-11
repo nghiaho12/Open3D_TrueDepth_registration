@@ -3,7 +3,7 @@ import glob
 import copy
 import math
 import time
-from enum import Enum
+from pathlib import Path
 
 import numpy as np
 from scipy.spatial.transform import Rotation
@@ -99,65 +99,85 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
     all_matches = dict()
 
     if not pose_graph_optimzation:
-        args.max_look_ahead = 1
+        args.search_range = 1
 
     # match all pairings
     # NOTE: This is highly parallelisable!!!
     for i in range(0, len(point_clouds)):
         all_matches[i] = dict()
         pc_i = point_clouds[i]
+        i_image_file = Path(pc_i.image_file).name
 
-        if args.max_look_ahead > len(point_clouds) or args.max_look_ahead <= 0:
+        if args.search_range > len(point_clouds) or args.search_range <= 0:
             # all matches
             js = range(i+1, len(point_clouds))
         else:
             js = []
-            for k in range(0, args.max_look_ahead):
+            for k in range(0, args.search_range):
                 js.append((i+1+k) % len(point_clouds))
 
         for j in js:
             pc_j = point_clouds[j]
             i_pts, j_pts = find_sift_matches(pc_i.kp, pc_i.desc, pc_j.kp, pc_j.desc)
-
-            if len(i_pts) == 0:
-                print(f"Matching {pc_i.image_file} {pc_j.image_file}, matches: 0")
-                continue
+            j_image_file = Path(pc_j.image_file).name
 
             # geometric constraint
             _, mask = cv.findFundamentalMat(np.array(i_pts), np.array(j_pts), cv.FM_RANSAC, 3.0)
 
-            if mask is not None:
-                mask = mask.squeeze()
-                i_pts = np.array(i_pts)[np.where(mask)]
-                j_pts = np.array(j_pts)[np.where(mask)]
+            if mask is None:
+                continue
 
-                # find common good points
-                i_3d, i_2d, i_good_idx = pc_i.project3d(i_pts)
-                j_3d, j_2d, j_good_idx = pc_j.project3d(j_pts)
-                good_idx = np.intersect1d(i_good_idx, j_good_idx)
+            if len(mask) < args.min_matches:
+                #print(f"Matching {i_image_file} {j_image_file}, matches: {len(i_pts)} < {args.min_matches}, skipping")
+                continue
 
-                i_3d = i_3d[good_idx]
-                i_2d = i_2d[good_idx]
-                j_3d = j_3d[good_idx]
-                j_2d = j_2d[good_idx]
+            mask = mask.squeeze()
+            i_pts = np.array(i_pts)[np.where(mask)]
+            j_pts = np.array(j_pts)[np.where(mask)]
 
-                all_matches[i][j] = (i_2d, i_3d, j_2d, j_3d)
+            # find common good points
+            i_3d, i_2d, i_good_idx = pc_i.project3d(i_pts)
+            j_3d, j_2d, j_good_idx = pc_j.project3d(j_pts)
+            good_idx = np.intersect1d(i_good_idx, j_good_idx)
 
-                print(f"Matching {pc_i.image_file} {pc_j.image_file}, matches: {len(i_3d)}")
+            if len(good_idx)  < args.min_matches:
+                #print(f"Matching {i_image_file} {j_image_file}, matches: {len(good_idx)} < {args.min_matches}, skipping")
+                continue
+
+            i_3d = i_3d[good_idx]
+            i_2d = i_2d[good_idx]
+            j_3d = j_3d[good_idx]
+            j_2d = j_2d[good_idx]
+
+            # one last sanity check
+            R, t, rmse = rigid_transform_3D(i_3d.transpose(), j_3d.transpose())
+
+            if rmse > args.max_vision_rmse:
+                #print(f"Matching {i_image_file} {j_image_file}, bad vision rmse: {rmse}")
+                continue
+
+            all_matches[i][j] = (i_2d, i_3d, j_2d, j_3d)
+
+            print(f"Matching {i_image_file} {j_image_file}, matches: {len(i_3d)}")
 
     # run sequential matching to initialize the camera poses
     for i in range(1, len(point_clouds)):
         prev = point_clouds[i-1]
         cur = point_clouds[i]
 
-        print(cur.image_file, cur.depth_file)
-
-        prev_2d, prev_3d, cur_2d, cur_3d = all_matches[i-1][i]
-        R, t, rmse = rigid_transform_3D(cur_3d.transpose(), prev_3d.transpose())
+        print(cur.image_file)
 
         delta_pose = np.eye(4, 4)
-        delta_pose[0:3, 0:3] = R
-        delta_pose[0:3, 3:4] = t
+
+        if (i-1) in all_matches and i in all_matches[i-1]:
+            prev_2d, prev_3d, cur_2d, cur_3d = all_matches[i-1][i]
+            R, t, rmse = rigid_transform_3D(cur_3d.transpose(), prev_3d.transpose())
+
+            delta_pose[0:3, 0:3] = R
+            delta_pose[0:3, 3:4] = t
+        else:
+            print(f"No matches for {prev.image_file} and {cur.image_file}, using identity pose")
+
         #print(delta_pose)
         #print("vision rmse:", rmse)
 
@@ -199,10 +219,9 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
             for idx2 in all_matches[idx1]:
                 i_2d, i_3d, j_2d, j_3d = all_matches[idx1][idx2]
 
-                if len(i_3d) > args.min_matches:
-                    for p, c in zip(i_3d, j_3d):
-                        r = np.array([idx1, idx2, p[0], p[1], p[2], c[0], c[1], c[2]])
-                        matches = np.vstack((matches, r))
+                for p, c in zip(i_3d, j_3d):
+                    r = np.array([idx1, idx2, p[0], p[1], p[2], c[0], c[1], c[2]])
+                    matches = np.vstack((matches, r))
 
         optim_poses = pose_graph(poses, matches)
 
@@ -234,7 +253,7 @@ def sequential_ICP(args, point_clouds):
         reg = o3d.registration.registration_icp(
             cur.pcd,
             prev.pcd,
-            args.distance_threshold,
+            args.icp_max_dist,
             guess,
             o3d.registration.TransformationEstimationPointToPlane())
 
