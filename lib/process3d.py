@@ -152,7 +152,7 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
 
     if pose_graph_optimzation:
         # find loop closure (if any) with the last image
-        print("Finding loop closure")
+        print("\nFinding loop closure")
         all_matches[len(point_clouds)-1] = dict()
 
         best_num_match = 0
@@ -183,6 +183,7 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
         all_matches[len(point_clouds)-1][best_match_idx] = best_match
 
     # run sequential matching to initialize the camera poses
+    print("\nInitializing camera poses")
     for i in range(1, len(point_clouds)):
         prev = point_clouds[i-1]
         cur = point_clouds[i]
@@ -195,7 +196,7 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
 
             delta_pose[0:3, 0:3] = R
             delta_pose[0:3, 3:4] = t
-            print(f"{cur.image_file} matches: {len(prev_3d)}")
+            print(f"{cur.image_file}, matches: {len(prev_3d)}")
         else:
             print(f"No matches for {prev.image_file} and {cur.image_file}, using identity pose")
 
@@ -217,8 +218,7 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
             cv.waitKey(20)
 
     if pose_graph_optimzation:
-        print("Running pose graph optimization")
-        # setup pose graph for optimization
+        print("\nRunning pose graph optimization")
 
         # poses - these variables get optimized
         poses = np.zeros((len(point_clouds), 7))
