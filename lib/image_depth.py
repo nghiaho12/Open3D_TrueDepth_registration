@@ -83,13 +83,15 @@ class ImageDepth:
         self.map_y = new_xy[:,1].reshape((self.height, self.width)).astype(np.float32)
 
     def load_depth(self, file,):
-        t = time.time()
         depth = np.fromfile(file, dtype='float16').astype(np.float32)
 
         # vectorize version, faster
         # all possible (x,y) position
-        xy = [(x,y) for y in range(0, self.height) for x in range(0, self.width)]
-        xy = np.array(xy).astype(np.float32)
+        idx = np.arange(0, self.width*self.height)
+        xy = np.zeros((self.width*self.height, 2), dtype=np.float32)
+
+        xy[:,0] = np.mod(idx, self.width)
+        xy[:,1] = idx // self.width
 
         # remove bad values
         no_nan = np.invert(np.isnan(depth))
@@ -137,7 +139,7 @@ class ImageDepth:
         self.gray_undistort = cv.remap(self.gray, self.map_x, self.map_y, cv.INTER_LINEAR)
 
     def project3d(self, pts):
-        # epxect pts to be Nx2
+        # expect pts to be Nx2
 
         xy = np.round(pts).astype(np.int)
 

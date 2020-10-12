@@ -10,7 +10,6 @@ from scipy.spatial.transform import Rotation
 import open3d as o3d
 import matplotlib.pyplot as plt
 import cv2 as cv
-from mpl_toolkits.axes_grid1 import ImageGrid
 from . rigid_transform_3D import rigid_transform_3D
 from . image_depth import ImageDepth
 from cpp.pose_graph import pose_graph
