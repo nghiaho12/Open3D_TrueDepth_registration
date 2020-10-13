@@ -1,3 +1,5 @@
+![](http://nghiaho.com/wp-content/uploads/2020/10/animated_mesh.png)
+
 # Open3D_TrueDepth_registration
 Automatic point cloud registration. Currently, I've only tested it on data from Apple's TrueDepth camera. Adapating it to other system should not be hard.
 

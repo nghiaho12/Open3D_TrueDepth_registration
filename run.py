@@ -17,7 +17,7 @@ if __name__ == "__main__":
 
     parser.add_argument('folder', help='folder containing bins and camera calibration')
     parser.add_argument('--viz', type=int, default=1, help='visualize result')
-    parser.add_argument('--method', type=int, default=0, help='Registration method\n0: global vision based (2d/3d with pose graph optimization)\n1: sequential vision based (2d/3d)\n2: sequential ICP (3d only)\n')
+    parser.add_argument('--method', type=int, default=2, help='Registration method\n0: sequential ICP\n1: sequential vision based\n2: sequential vision based with loop closure\n')
     parser.add_argument('--output', default="output.ply", help='save PLY file')
     parser.add_argument('--width', type=int, default=640, help='image width')
     parser.add_argument('--height', type=int, default=480, help='image height')

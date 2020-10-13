@@ -56,11 +56,11 @@ def process3d(args):
         point_clouds.append(obj)
 
     if args.method == 0:
-        vision_based_registration(args, point_clouds, True)
+        sequential_ICP(args, point_clouds)
     if args.method == 1:
         vision_based_registration(args, point_clouds, False)
     elif args.method == 2:
-        sequential_ICP(args, point_clouds)
+        vision_based_registration(args, point_clouds, True)
 
     global_pcd = None
 
