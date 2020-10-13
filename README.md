@@ -18,6 +18,8 @@ folder/videoXX.bin
 ```
 To modify for your dataset edit the function process3d in process3d.py.
 
+This dataset was provided by my friend at [https://punkoffice.com](https://punkoffice.com).
+
 # Git submodule
 Call the following to pull in the pybind11 submodule.
 ```
