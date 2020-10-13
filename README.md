@@ -9,10 +9,11 @@ curl -O http://nghiaho.com/uploads/box_can.zip
 ```
 
 The script expects the following directory structure
+```
 folder/calibration.json
 folder/depthXX.bin
 folder/videoXX.bin
-
+```
 To modify for your dataset edit the function process3d in process3d.py.
 
 # Git submodule
