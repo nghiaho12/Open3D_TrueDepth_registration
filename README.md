@@ -38,7 +38,7 @@ pip install opencv-python
 ```
 
 # Compiling pose_graph.cpp
-You'll need the following libraries installed
+You'll need the following C++ libraries installed
 - Eigen (http://eigen.tuxfamily.org/index.php?title=Main_Page)
 - Ceres Solver (http://ceres-solver.org/)
 
