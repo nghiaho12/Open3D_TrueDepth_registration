@@ -1,6 +1,6 @@
 ![](http://nghiaho.com/wp-content/uploads/2020/10/animated_mesh.png)
 
-This is a demonstration of how to use the iPhone TrueDepth camera as a 3D scanner. It performs automatic 3D point cloud registration and can optionally generate a 3D colored mesh. It has been tested in the simple scenario where the user pans 360 dgrees around an object and captures every 10 degrees or so.
+This is repo demonstrates how to use the iPhone TrueDepth camera as a 3D scanner. It performs automatic 3D point cloud registration and can optionally generate a 3D colored mesh. It has been tested in the simple scenario where the user pans 360 dgrees around an object and captures every 10 degrees or so.
 
 You can check my blog post on this code at [http://nghiaho.com/?p=2629](http://nghiaho.com/?p=2629)
 
