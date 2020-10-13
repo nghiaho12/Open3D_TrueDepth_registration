@@ -2,6 +2,8 @@
 
 This is a demonstration of how to use the iPhone TrueDepth camera as a 3D scanner. It performs automatic 3D point cloud registration and can optionally generate a 3D colored mesh. It has been tested in the simple scenario where the user pans 360 dgrees around an object and captures every 10 degrees or so.
 
+You can check my blog post on this code at [http://nghiaho.com/?p=2629](http://nghiaho.com/?p=2629)
+
 # Dataset
 Download the test dataset and extract it somewhere
 ```
@@ -79,5 +81,3 @@ You'll want to adjust the following so your object is segmented out from the bac
 
 ## Meshing
 You can enable mesh reconstruction with --mesh 1. If you only expect a single mesh you can also use --keep_largest_mesh 1. This is useful for removing noise.
-
-
