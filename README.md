@@ -78,6 +78,6 @@ You'll want to adjust the following so your object is segmented out from the bac
 - --max_depth
 
 ## Meshing
-You can enable mesh reconstruction with --mesh 1. If you only expect a single mesh you can also use --keep_largest_mesh 1. This is also useful for removing noise.
+You can enable mesh reconstruction with --mesh 1. If you only expect a single mesh you can also use --keep_largest_mesh 1. This is useful for removing noise.
 
 
