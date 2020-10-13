@@ -29,7 +29,7 @@ You'll need the following Python libraries installed
 - Scipy
 - OpenCV
 
-All the above can be installing using pip
+All the above can be installed using pip
 ```
 pip install open3d
 pip install numpy
