@@ -55,6 +55,9 @@ def process3d(args):
 
         point_clouds.append(obj)
 
+        #cv.imshow("img", obj.depth_map)
+        #cv.waitKey(0)
+
     if args.method == 0:
         sequential_ICP(args, point_clouds)
     if args.method == 1:
@@ -109,7 +112,7 @@ def match_features(args, pc_i, pc_j):
     _, mask = cv.findFundamentalMat(np.array(i_pts), np.array(j_pts), cv.FM_RANSAC, 3.0)
 
     if mask is None:
-        return (None, None, None, None, None)
+        return None, None, None, None, None
 
     mask = mask.squeeze()
     i_pts = np.array(i_pts)[np.where(mask)]
@@ -121,7 +124,7 @@ def match_features(args, pc_i, pc_j):
     good_idx = np.intersect1d(i_good_idx, j_good_idx)
 
     if len(good_idx) == 0:
-        return (None, None, None, None, None)
+        return None, None, None, None, None
 
     i_3d = i_3d[good_idx]
     i_2d = i_2d[good_idx]
@@ -137,8 +140,8 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
 
     # run SIFT on all the images
     for cur in point_clouds:
-        print(f"Running SIFT on {cur.image_file}")
-        cur.kp, cur.desc = sift.detectAndCompute(cur.gray_undistort, None)
+        cur.kp, cur.desc = sift.detectAndCompute(cur.gray_undistort, cur.mask)
+        print(f"Running SIFT on {cur.image_file}, features={len(cur.kp)}")
 
     all_matches = dict()
 
@@ -152,17 +155,30 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
 
         i_2d, i_3d, j_2d, j_3d, rmse = match_features(args, pc_i, pc_j)
 
+        all_matches[i][j] = (i_2d, i_3d, j_2d, j_3d)
+
         if i_2d is None:
             print(f"Matching {pc_i.image_file} {pc_j.image_file}, matches: 0")
             continue
 
         print(f"Matching {pc_i.image_file} {pc_j.image_file}, matches: {len(i_2d)}, rmse: {rmse:.4f}")
 
-        if len(i_2d) < args.min_matches or rmse > args.max_vision_rmse:
-            print("   bad match!")
-            continue
+        if args.viz:
+            img = cv.cvtColor(pc_i.gray_undistort, cv.COLOR_GRAY2BGR)
 
-        all_matches[i][j] = (i_2d, i_3d, j_2d, j_3d)
+            # draw matches
+            if i_2d is not None:
+                for a, b in zip(i_2d, j_2d):
+                    aa = (a[0].item(), a[1].item())
+                    bb = (b[0].item(), b[1].item())
+                    img = cv.line(img, aa, bb, (0,0,255))
+
+            cv.imshow("cur", img)
+            cv.waitKey(10)
+
+        if len(i_2d) < args.min_matches or rmse > args.max_vision_rmse:
+            sys.exit("Not enough matches! Try increasing the max depth or try an ICP based method.")
+            all_matches[i][j] = (None, None, None, None)
 
     if pose_graph_optimzation:
         # find loop closure (if any) with the last image
@@ -173,7 +189,7 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
         best_match = None
         best_match_idx = 0
 
-        for j in range(0, args.loop_closure_range):
+        for j in range(0, min(len(point_clouds), args.loop_closure_range)):
             pc_i = point_clouds[-1]
             pc_j = point_clouds[j]
             i_2d, i_3d, j_2d, j_3d, rmse = match_features(args, pc_i, pc_j)
@@ -185,7 +201,6 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
             print(f"Matching {pc_i.image_file} {pc_j.image_file}, matches: {len(i_2d)}, rmse: {rmse:.4f}")
 
             if len(i_2d) < args.min_matches or rmse > args.max_vision_rmse:
-                print("   bad match!")
                 continue
 
             if len(i_2d) > best_num_match:
@@ -196,6 +211,9 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
         print(f"Best loop closure match {point_clouds[best_match_idx].image_file} matches: {best_num_match}")
         all_matches[len(point_clouds)-1][best_match_idx] = best_match
 
+        if best_num_match == 0:
+            sys.exit("Not enough matches for loop closure!")
+
     # run sequential matching to initialize the camera poses
     print("\nInitializing camera poses")
     for i in range(1, len(point_clouds)):
@@ -203,6 +221,9 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
         cur = point_clouds[i]
 
         delta_pose = np.eye(4, 4)
+
+        prev_2d = None
+        cur_2d = None
 
         if (i-1) in all_matches and i in all_matches[i-1]:
             prev_2d, prev_3d, cur_2d, cur_3d = all_matches[i-1][i]
@@ -219,17 +240,6 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
 
         cur.pose = prev.pose @ delta_pose
 
-        if args.viz:
-            img = cv.cvtColor(cur.gray_undistort, cv.COLOR_GRAY2BGR)
-
-            # draw matches
-            for a, b in zip(prev_2d, cur_2d):
-                aa = (a[0].item(), a[1].item())
-                bb = (b[0].item(), b[1].item())
-                img = cv.line(img, aa, bb, (0,0,255))
-
-            cv.imshow("cur", img)
-            cv.waitKey(20)
 
     if pose_graph_optimzation:
         print("\nRunning pose graph optimization")

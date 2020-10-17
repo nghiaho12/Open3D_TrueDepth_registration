@@ -101,6 +101,10 @@ class ImageDepth:
         xy = xy[np.where(idx)]
         rgb = self.img_undistort.reshape(-1, 3)[np.where(idx)] / 255.0
 
+        self.mask = np.ones(self.height*self.width, dtype=np.uint8)*255
+        self.mask[np.where(idx == False)] = 0
+        self.mask = self.mask.reshape((self.height, self.width))
+
         # mask out depth buffer
         self.depth_map = depth
         self.depth_map[np.where(idx == False)] = -1000
