@@ -32,6 +32,9 @@ You'll need the following Python libraries installed
 - Numpy
 - Scipy
 - OpenCV
+- torch
+- sklearn
+- pandas
 
 All the above can be installed using pip
 ```
@@ -39,6 +42,9 @@ pip install open3d
 pip install numpy
 pip install scipy
 pip install opencv-python
+pip install torch
+pip install sklearn
+pip install pandas
 ```
 
 # Compiling pose_graph.cpp

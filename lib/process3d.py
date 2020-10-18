@@ -10,12 +10,11 @@ from scipy.spatial.transform import Rotation
 import open3d as o3d
 import matplotlib.pyplot as plt
 import cv2 as cv
-from . rigid_transform_3D import rigid_transform_3D
 from . image_depth import ImageDepth
-from cpp.pose_graph import pose_graph
+from cpp.pose_graph import optimize_pose_graph_with_matches, optimize_pose_graph_with_odometry
 
 def process3d(args):
-    if args.method >= 3:
+    if args.method >= 4:
         sys.exit("Unsupported registration method")
 
     image_files = sorted(glob.glob(f"{args.folder}/video*.bin"))#[0:3]
@@ -55,21 +54,22 @@ def process3d(args):
 
         point_clouds.append(obj)
 
-        #cv.imshow("img", obj.depth_map)
+        #cv.imshow("img", obj.img)
         #cv.waitKey(0)
 
     if args.method == 0:
-        sequential_ICP(args, point_clouds)
-    if args.method == 1:
+        sequential_ICP(args, point_clouds, False)
+    elif args.method == 1:
+        sequential_ICP(args, point_clouds, True)
+    if args.method == 2:
         vision_based_registration(args, point_clouds, False)
-    elif args.method == 2:
+    elif args.method == 3:
         vision_based_registration(args, point_clouds, True)
 
     global_pcd = None
 
     for i, pc in enumerate(point_clouds):
         pc.pcd.transform(pc.pose)
-
         if global_pcd is None:
             global_pcd = pc.pcd
         else:
@@ -108,11 +108,11 @@ def process3d(args):
 def match_features(args, pc_i, pc_j):
     i_pts, j_pts = find_sift_matches(pc_i.kp, pc_i.desc, pc_j.kp, pc_j.desc)
 
-    # geometric constraint
+    # geometric filter
     _, mask = cv.findFundamentalMat(np.array(i_pts), np.array(j_pts), cv.FM_RANSAC, 3.0)
 
     if mask is None:
-        return None, None, None, None, None
+        return None, None, None, None, None, None
 
     mask = mask.squeeze()
     i_pts = np.array(i_pts)[np.where(mask)]
@@ -124,16 +124,35 @@ def match_features(args, pc_i, pc_j):
     good_idx = np.intersect1d(i_good_idx, j_good_idx)
 
     if len(good_idx) == 0:
-        return None, None, None, None, None
+        return None, None, None, None, None, None
 
     i_3d = i_3d[good_idx]
     i_2d = i_2d[good_idx]
     j_3d = j_3d[good_idx]
     j_2d = j_2d[good_idx]
 
-    R, t, rmse = rigid_transform_3D(i_3d.transpose(), j_3d.transpose())
+    # filter out points with bad alignment
+    src = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(i_3d))
+    dst = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(j_3d))
 
-    return i_2d, i_3d, j_2d, j_3d, rmse
+    corr = np.zeros((len(i_3d), 2), dtype=np.int32)
+    corr[:,0] = np.arange(0, len(i_3d))
+    corr[:,1] = corr[:,0]
+
+    ret = o3d.pipelines.registration.registration_ransac_based_on_correspondence(
+        src,
+        dst,
+        o3d.utility.Vector2iVector(corr),
+        args.max_point_dist);
+
+    corr = np.array(ret.correspondence_set)
+
+    i_3d = i_3d[corr[:,0]]
+    i_2d = i_2d[corr[:,0]]
+    j_3d = j_3d[corr[:,0]]
+    j_2d = j_2d[corr[:,0]]
+
+    return i_2d, i_3d, j_2d, j_3d, ret.transformation, ret.inlier_rmse
 
 def vision_based_registration(args, point_clouds, pose_graph_optimzation):
     sift = cv.SIFT_create()
@@ -153,9 +172,9 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
         pc_i = point_clouds[i]
         pc_j = point_clouds[j]
 
-        i_2d, i_3d, j_2d, j_3d, rmse = match_features(args, pc_i, pc_j)
+        i_2d, i_3d, j_2d, j_3d, transform, rmse = match_features(args, pc_i, pc_j)
 
-        all_matches[i][j] = (i_2d, i_3d, j_2d, j_3d)
+        all_matches[i][j] = (i_2d, i_3d, j_2d, j_3d, transform)
 
         if i_2d is None:
             print(f"Matching {pc_i.image_file} {pc_j.image_file}, matches: 0")
@@ -174,11 +193,29 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
                     img = cv.line(img, aa, bb, (0,0,255))
 
             cv.imshow("cur", img)
-            cv.waitKey(10)
+            cv.waitKey(20)
 
         if len(i_2d) < args.min_matches or rmse > args.max_vision_rmse:
-            sys.exit("Not enough matches! Try increasing the max depth or try an ICP based method.")
-            all_matches[i][j] = (None, None, None, None)
+            sys.exit("Not enough matches! Try an ICP based method or loosen --max_vision_rmse.")
+            all_matches[i][j] = (None, None, None, None, None)
+
+    # initialize the camera poses
+    print("\nInitializing camera poses")
+    for i in range(1, len(point_clouds)):
+        prev = point_clouds[i-1]
+        cur = point_clouds[i]
+
+        delta_pose = np.eye(4, 4)
+
+        if (i-1) in all_matches and i in all_matches[i-1]:
+            prev_2d, prev_3d, cur_2d, cur_3d, transform = all_matches[i-1][i]
+
+            delta_pose = np.linalg.inv(transform);
+            print(f"{cur.image_file}, matches: {len(prev_3d)}")
+        else:
+            print(f"No matches for {prev.image_file} and {cur.image_file}, using identity pose")
+
+        cur.pose = prev.pose @ delta_pose
 
     if pose_graph_optimzation:
         # find loop closure (if any) with the last image
@@ -189,10 +226,10 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
         best_match = None
         best_match_idx = 0
 
-        for j in range(0, min(len(point_clouds), args.loop_closure_range)):
+        for j in range(0, min(len(point_clouds)-1, args.loop_closure_range)):
             pc_i = point_clouds[-1]
             pc_j = point_clouds[j]
-            i_2d, i_3d, j_2d, j_3d, rmse = match_features(args, pc_i, pc_j)
+            i_2d, i_3d, j_2d, j_3d, transform, rmse = match_features(args, pc_i, pc_j)
 
             if i_2d is None:
                 print(f"Matching {pc_i.image_file} {pc_j.image_file}, matches: 0")
@@ -205,7 +242,7 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
 
             if len(i_2d) > best_num_match:
                 best_num_match = len(i_2d)
-                best_match = (i_2d, i_3d, j_2d, j_3d)
+                best_match = (i_2d, i_3d, j_2d, j_3d, transform)
                 best_match_idx = j
 
         print(f"Best loop closure match {point_clouds[best_match_idx].image_file} matches: {best_num_match}")
@@ -214,61 +251,23 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
         if best_num_match == 0:
             sys.exit("Not enough matches for loop closure!")
 
-    # run sequential matching to initialize the camera poses
-    print("\nInitializing camera poses")
-    for i in range(1, len(point_clouds)):
-        prev = point_clouds[i-1]
-        cur = point_clouds[i]
-
-        delta_pose = np.eye(4, 4)
-
-        prev_2d = None
-        cur_2d = None
-
-        if (i-1) in all_matches and i in all_matches[i-1]:
-            prev_2d, prev_3d, cur_2d, cur_3d = all_matches[i-1][i]
-            R, t, rmse = rigid_transform_3D(cur_3d.transpose(), prev_3d.transpose())
-
-            delta_pose[0:3, 0:3] = R
-            delta_pose[0:3, 3:4] = t
-            print(f"{cur.image_file}, matches: {len(prev_3d)}")
-        else:
-            print(f"No matches for {prev.image_file} and {cur.image_file}, using identity pose")
-
-        #print(delta_pose)
-        #print("vision rmse:", rmse)
-
-        cur.pose = prev.pose @ delta_pose
-
-
-    if pose_graph_optimzation:
         print("\nRunning pose graph optimization")
-
         # poses - these variables get optimized
         poses = np.zeros((len(point_clouds), 7))
         for i, p in enumerate(point_clouds):
-            r = Rotation.from_matrix(p.pose[0:3,0:3])
-            r = r.as_quat()
-
-            qx = r[0]
-            qy = r[1]
-            qz = r[2]
-            qw = r[3]
-
-            poses[i, 0:4] = np.array([qw, qx, qy, qz])
-            poses[i, 4:7] = p.pose[0:3,3]
+            poses[i,:] = get_pose_vector(p.pose)
 
         # matches - these are the constraints
         matches = np.zeros((0, 8))
         for idx1 in all_matches:
             for idx2 in all_matches[idx1]:
-                i_2d, i_3d, j_2d, j_3d = all_matches[idx1][idx2]
+                i_2d, i_3d, j_2d, j_3d, _ = all_matches[idx1][idx2]
 
                 for p, c in zip(i_3d, j_3d):
                     r = np.array([idx1, idx2, p[0], p[1], p[2], c[0], c[1], c[2]])
                     matches = np.vstack((matches, r))
 
-        optim_poses = pose_graph(poses, matches)
+        optim_poses = optimize_pose_graph_with_matches(poses, matches)
 
         # read back optimize values
         for pc, optim_pose in zip(point_clouds, optim_poses):
@@ -285,25 +284,101 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
 
             pc.pose = pose
 
-def sequential_ICP(args, point_clouds):
+def sequential_ICP(args, point_clouds, pose_graph_optimzation):
+    ys = []
+    zs = []
+
+    # http://www.open3d.org/docs/release/tutorial/pipelines/multiway_registration.html
+    pose_graph = o3d.pipelines.registration.PoseGraph()
+    odometry = np.identity(4)
+    pose_graph.nodes.append(o3d.pipelines.registration.PoseGraphNode(odometry))
+
     for i in range(1, len(point_clouds)):
         prev = point_clouds[i-1]
         cur = point_clouds[i]
 
-        print(cur.image_file, cur.depth_file)
+        transform, information = pairwise_ICP_registration(prev.pcd, cur.pcd, args.max_point_dist)
+        odometry = transform.transformation @ odometry
 
-        delta_pose = np.eye(4, 4)
+        pose_graph.nodes.append(
+            o3d.pipelines.registration.PoseGraphNode(
+                np.linalg.inv(odometry)))
 
-        guess = np.eye(4,4)
-        reg = o3d.registration.registration_icp(
-            cur.pcd,
-            prev.pcd,
-            args.icp_max_dist,
-            guess,
-            o3d.registration.TransformationEstimationPointToPlane())
+        pose_graph.edges.append(
+            o3d.pipelines.registration.PoseGraphEdge(
+                i-1, i,
+                transform.transformation,
+                information,
+                uncertain=False))
 
-        delta_pose = reg.transformation
-        cur.pose = prev.pose @ delta_pose
+        print(f"sequential ICP: {prev.image_file} -> {cur.image_file}, rmse: {transform.inlier_rmse:.4f}")
+
+        cur.pose = pose_graph.nodes[-1].pose.copy()
+
+        ys.append(cur.pose[1,3])
+        zs.append(cur.pose[2,3])
+
+    #plt.plot(ys,zs,marker="o")
+    #ax = plt.gca()
+    #ax.set_aspect("equal")
+    #plt.show()
+
+    if pose_graph_optimzation:
+        print("\nFinding loop closure")
+
+        best_rmse = 100000.0
+        best_match_idx = 0
+        best_transform = None
+        best_information = None
+
+        for j in range(0, min(len(point_clouds)-1, args.loop_closure_range)):
+            last = point_clouds[-1]
+            cur = point_clouds[j]
+
+            transform, information = pairwise_ICP_registration(last.pcd, cur.pcd, args.icp_loop_closure_dist)
+
+            print(f"Loop closure test: {last.image_file} -> {cur.image_file}, rmse: {transform.inlier_rmse:.4f}, fitness: {transform.fitness}")
+
+            if transform.inlier_rmse < best_rmse:
+                best_rmse = transform.inlier_rmse
+                best_transform = transform.transformation
+                best_information = information
+                best_match_idx = j
+
+        print(f"Best loop closure match {point_clouds[best_match_idx].image_file} rmse: {best_rmse}")
+        pose_graph.edges.append(
+            o3d.pipelines.registration.PoseGraphEdge(
+                len(point_clouds)-1,
+                best_match_idx,
+                best_transform,
+                best_information,
+                uncertain=True))
+
+        option = o3d.pipelines.registration.GlobalOptimizationOption(
+            max_correspondence_distance=args.max_point_dist,
+            edge_prune_threshold=0.25,
+            reference_node=0)
+
+        with o3d.utility.VerbosityContextManager(o3d.utility.VerbosityLevel.Debug) as cm:
+            o3d.pipelines.registration.global_optimization(
+                pose_graph,
+                o3d.pipelines.registration.GlobalOptimizationLevenbergMarquardt(),
+                o3d.pipelines.registration.GlobalOptimizationConvergenceCriteria(),
+                option)
+
+        ys2 = []
+        zs2 = []
+        for i in range(len(point_clouds)):
+            point_clouds[i].pose = pose_graph.nodes[i].pose
+
+            ys2.append(point_clouds[i].pose[1,3])
+            zs2.append(point_clouds[i].pose[2,3])
+
+        #plt.plot(ys,zs,marker="o")
+        #plt.plot(ys2,zs2,marker="o")
+        #ax = plt.gca()
+        #ax.set_aspect("equal")
+        #plt.show()
 
 def custom_draw_geometry(pcd, name="Open3D"):
     vis = o3d.visualization.Visualizer()
@@ -348,3 +423,34 @@ def find_sift_matches(prev_kp, prev_desc, cur_kp, cur_desc):
             cur_pts.append(cur_kp[cur_idx].pt)
 
     return prev_pts, cur_pts
+
+def get_pose_vector(pose):
+    r = Rotation.from_matrix(pose[0:3,0:3])
+    r = r.as_quat()
+
+    qx = r[0]
+    qy = r[1]
+    qz = r[2]
+    qw = r[3]
+
+    tx = pose[0,3]
+    ty = pose[1,3]
+    tz = pose[2,3]
+
+    return np.array([qw, qx, qy, qz, tx, ty, tz])
+
+def pairwise_ICP_registration(source, target, icp_dist):
+    t = o3d.pipelines.registration.registration_icp(
+        source,
+        target,
+        icp_dist,
+        np.eye(4, 4),
+        o3d.pipelines.registration.TransformationEstimationPointToPlane())
+
+    info = o3d.pipelines.registration.get_information_matrix_from_point_clouds(
+        source,
+        target,
+        icp_dist,
+        t.transformation)
+
+    return t, info
