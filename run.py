@@ -40,6 +40,7 @@ if __name__ == "__main__":
     parser.add_argument("--mesh", type=int, default=0, help="make a mesh instead of point cloud")
     parser.add_argument("--mesh_depth", type=int, default=10, help="Poisson reconstruction depth, higher results in more detail")
     parser.add_argument("--keep_largest_mesh", type=int, default=0, help="keep only the largest mesh, useful for filtering noise")
+    parser.add_argument("--view_only", type=int, default=0, help="view the data only. Hit any key to go the next image. ESCAPE to exit.")
 
     args = parser.parse_args()
 

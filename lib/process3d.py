@@ -54,8 +54,23 @@ def process3d(args):
 
         point_clouds.append(obj)
 
-        #cv.imshow("img", obj.img)
-        #cv.waitKey(0)
+        if args.view_only:
+            img = cv.cvtColor(obj.img, cv.COLOR_RGB2BGR)
+            depth = np.maximum(0.0, obj.depth_map)
+            depth = (depth / np.max(depth)*255).astype(np.uint8)
+            depth = cv.cvtColor(depth, cv.COLOR_GRAY2BGR)
+
+            canvas = cv.hconcat([img, depth])
+            cv.imshow(obj.image_file, canvas)
+
+            key = cv.waitKey(0)
+            if key == 27: # ESCAPE
+                return
+
+            cv.destroyWindow(obj.image_file)
+
+    if args.view_only:
+        return
 
     if args.method == 0:
         sequential_ICP(args, point_clouds, False)
