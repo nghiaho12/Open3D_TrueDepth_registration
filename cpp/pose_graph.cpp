@@ -269,6 +269,12 @@ void cpp_optimize_pose_graph_with_odometry(std::vector<double> &poses, const std
 
         problem.SetParameterization(poses.data() + id1*POSE_DIM, quaternion_parameterisation);
         problem.SetParameterization(poses.data() + id2*POSE_DIM, quaternion_parameterisation);
+
+        if (i == 0) {
+            // Fixed params for the first pose
+            problem.SetParameterBlockConstant(poses.data());
+            problem.SetParameterBlockConstant(poses.data()+4);
+        }
     }
 
     ceres::Solver::Options options;

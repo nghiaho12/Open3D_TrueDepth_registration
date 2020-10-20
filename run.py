@@ -31,7 +31,6 @@ if __name__ == "__main__":
     parser.add_argument("--min_depth", type=float, default=0.1, help="min depth distance")
     parser.add_argument("--max_depth", type=float, default=0.5, help="max depth distance")
     parser.add_argument("--max_point_dist", type=float, default=0.02, help="max distance between points for ICP/vision methods")
-    parser.add_argument("--icp_loop_closure_dist", type=float, default=0.1, help="max distance between points for ICP loop closure")
     parser.add_argument("--normal_radius", type=float, default=0.01, help="max radius for normal calculation for ICP methods")
     parser.add_argument("--min_matches", type=int, default=30, help="min matches for vision based method")
     parser.add_argument("--loop_closure_range", type=int, default=10, help="search N images from the start to find a loop closure with the last image")

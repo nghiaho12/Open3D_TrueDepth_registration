@@ -361,11 +361,11 @@ def sequential_ICP(args, point_clouds, pose_graph_optimzation):
             last = point_clouds[-1]
             cur = point_clouds[j]
 
-            transform, information = pairwise_ICP_registration(last.pcd, cur.pcd, args.icp_loop_closure_dist)
+            transform, information = pairwise_ICP_registration(last.pcd, cur.pcd, args.max_point_dist)
 
-            print(f"Loop closure test: {last.image_file} -> {cur.image_file}, rmse: {transform.inlier_rmse:.4f}, fitness: {transform.fitness}")
+            print(f"Loop closure test: {last.image_file} -> {cur.image_file}, rmse: {transform.inlier_rmse:.4f}, fitness: {transform.fitness:.4f}")
 
-            if transform.inlier_rmse < best_rmse:
+            if transform.inlier_rmse < best_rmse and transform.fitness > 0:
                 best_rmse = transform.inlier_rmse
                 best_transform = transform.transformation
                 best_information = information
@@ -487,6 +487,8 @@ def pairwise_ICP_registration(source, target, icp_dist):
 
 def create_cameras(point_clouds, camera_edges):
     camera_width = 0.05 # world unit
+    camera_color = np.array([0.8, 0.8, 0.8])
+    camera_edge_color = np.array([0.5, 0.5, 0.8])
 
     cameras = []
 
@@ -519,7 +521,7 @@ def create_cameras(point_clouds, camera_edges):
 
         camera = o3d.geometry.LineSet(o3d.utility.Vector3dVector(vert), o3d.utility.Vector2iVector(tri_idx))
         camera.transform(pc.pose)
-        camera.paint_uniform_color(np.array([0.8, 0.8, 0.8]))
+        camera.paint_uniform_color(camera_color)
 
         cameras.append(camera)
 
@@ -539,7 +541,7 @@ def create_cameras(point_clouds, camera_edges):
             ])
 
         edge = o3d.geometry.LineSet(o3d.utility.Vector3dVector(vert), o3d.utility.Vector2iVector(idx))
-        edge.paint_uniform_color(np.array([0.8, 0.8, 0.8]))
+        edge.paint_uniform_color(camera_edge_color)
 
         cameras.append(edge)
 
