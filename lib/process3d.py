@@ -73,13 +73,13 @@ def process3d(args):
         return
 
     if args.method == 0:
-        sequential_ICP(args, point_clouds, False)
+        camera_edges = sequential_ICP(args, point_clouds, False)
     elif args.method == 1:
-        sequential_ICP(args, point_clouds, True)
+        camera_edges = sequential_ICP(args, point_clouds, True)
     if args.method == 2:
-        vision_based_registration(args, point_clouds, False)
+        camera_edges = vision_based_registration(args, point_clouds, False)
     elif args.method == 3:
-        vision_based_registration(args, point_clouds, True)
+        camera_edges = vision_based_registration(args, point_clouds, True)
 
     global_pcd = None
 
@@ -89,6 +89,8 @@ def process3d(args):
             global_pcd = pc.pcd
         else:
             global_pcd += pc.pcd
+
+    cameras = create_cameras(point_clouds, camera_edges)
 
     print(f"Saving to {args.output} ...")
 
@@ -108,7 +110,7 @@ def process3d(args):
         o3d.io.write_triangle_mesh(args.output, mesh)
 
         if args.viz:
-            custom_draw_geometry([mesh])
+            custom_draw_geometry([mesh] + cameras)
     else:
         # save the points
         # remove normals to save space
@@ -118,7 +120,7 @@ def process3d(args):
         o3d.io.write_point_cloud(args.output, global_pcd)
 
         if args.viz:
-            custom_draw_geometry([global_pcd])
+            custom_draw_geometry([global_pcd] + cameras)
 
 def match_features(args, pc_i, pc_j):
     i_pts, j_pts = find_sift_matches(pc_i.kp, pc_i.desc, pc_j.kp, pc_j.desc)
@@ -171,6 +173,7 @@ def match_features(args, pc_i, pc_j):
 
 def vision_based_registration(args, point_clouds, pose_graph_optimzation):
     sift = cv.SIFT_create()
+    camera_edges = []
 
     # run SIFT on all the images
     for cur in point_clouds:
@@ -182,6 +185,8 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
     # match neighbouring pairs
     for i in range(0, len(point_clouds)-1):
         j = i+1
+
+        camera_edges.append((i, j))
 
         all_matches[i] = dict()
         pc_i = point_clouds[i]
@@ -262,6 +267,7 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
 
         print(f"Best loop closure match {point_clouds[best_match_idx].image_file} matches: {best_num_match}")
         all_matches[len(point_clouds)-1][best_match_idx] = best_match
+        camera_edges.append((len(point_clouds)-1, best_match_idx))
 
         if best_num_match == 0:
             sys.exit("Not enough matches for loop closure!")
@@ -299,7 +305,10 @@ def vision_based_registration(args, point_clouds, pose_graph_optimzation):
 
             pc.pose = pose
 
+    return camera_edges
+
 def sequential_ICP(args, point_clouds, pose_graph_optimzation):
+    camera_edges = []
     ys = []
     zs = []
 
@@ -311,6 +320,8 @@ def sequential_ICP(args, point_clouds, pose_graph_optimzation):
     for i in range(1, len(point_clouds)):
         prev = point_clouds[i-1]
         cur = point_clouds[i]
+
+        camera_edges.append((i-1, i))
 
         transform, information = pairwise_ICP_registration(prev.pcd, cur.pcd, args.max_point_dist)
         odometry = transform.transformation @ odometry
@@ -361,6 +372,8 @@ def sequential_ICP(args, point_clouds, pose_graph_optimzation):
                 best_match_idx = j
 
         print(f"Best loop closure match {point_clouds[best_match_idx].image_file} rmse: {best_rmse}")
+        camera_edges.append((len(point_clouds)-1, best_match_idx))
+
         pose_graph.edges.append(
             o3d.pipelines.registration.PoseGraphEdge(
                 len(point_clouds)-1,
@@ -394,6 +407,8 @@ def sequential_ICP(args, point_clouds, pose_graph_optimzation):
         #ax = plt.gca()
         #ax.set_aspect("equal")
         #plt.show()
+
+    return camera_edges
 
 def custom_draw_geometry(pcd, name="Open3D"):
     vis = o3d.visualization.Visualizer()
@@ -469,3 +484,63 @@ def pairwise_ICP_registration(source, target, icp_dist):
         t.transformation)
 
     return t, info
+
+def create_cameras(point_clouds, camera_edges):
+    camera_width = 0.05 # world unit
+
+    cameras = []
+
+    for pc in point_clouds:
+        f = pc.intrinsic[0,0]
+        h = pc.img.shape[0]
+        w = pc.img.shape[1]
+
+        camera_focal = camera_width*f/w
+        camera_height = camera_width*h/w
+
+        vert = np.array([
+            [0, 0, 0],
+            [ camera_width/2,  camera_height/2, camera_focal],
+            [ camera_width/2, -camera_height/2, camera_focal],
+            [ -camera_width/2,-camera_height/2,  camera_focal],
+            [ -camera_width/2, camera_height/2,  camera_focal],
+            ])
+
+        tri_idx = np.array([
+            [0, 1],
+            [0, 2],
+            [0, 3],
+            [0, 4],
+            [1, 2],
+            [2, 3],
+            [3, 4],
+            [4, 1],
+            ])
+
+        camera = o3d.geometry.LineSet(o3d.utility.Vector3dVector(vert), o3d.utility.Vector2iVector(tri_idx))
+        camera.transform(pc.pose)
+        camera.paint_uniform_color(np.array([0.8, 0.8, 0.8]))
+
+        cameras.append(camera)
+
+    for camera_edge in camera_edges:
+        i, j = camera_edge
+
+        pose_i = point_clouds[i].pose
+        pose_j = point_clouds[j].pose
+
+        vert = np.array([
+            [pose_i[0,3], pose_i[1,3], pose_i[2,3]],
+            [pose_j[0,3], pose_j[1,3], pose_j[2,3]],
+            ])
+
+        idx = np.array([
+            [0, 1]
+            ])
+
+        edge = o3d.geometry.LineSet(o3d.utility.Vector3dVector(vert), o3d.utility.Vector2iVector(idx))
+        edge.paint_uniform_color(np.array([0.8, 0.8, 0.8]))
+
+        cameras.append(edge)
+
+    return cameras
