@@ -7,7 +7,7 @@ You can check my blog post on this code at [http://nghiaho.com/?p=2629](http://n
 # Dataset
 Download the test dataset and extract it somewhere
 ```
-curl -O http://nghiaho.com/uploads/box_can.zip
+curl -O https://nghiaho.com/uploads/box_can.zip
 ```
 
 The script expects the following directory structure
